@@ -1,0 +1,15 @@
+zona,q25,q50,q75,qmax,p_base,p_min,p_max
+Butaca Central,149,309,731,1864,80,50,149
+Preferente Central,129,195,244,303,600,424,849
+Platea 2,78,155,281,444,300,213,499
+Platea Cabecera 2,52,115,236,776,185,93,270
+Platea Cabecera,68,127,206,384,200,85,338
+Barrera Central,119,205,237,277,156,124,249
+Preferente Tunel,50,115,182,411,525,99,749
+Barrera Cabecera,39,133,315,720,120,51,199
+Preferente,37,91,139,202,575,324,650
+Butaca Cabecera,38,91,172,1059,60,37,99
+Preferente Cabecera,20,48,120,261,440,99,649
+Zona Boing,46,60,76,83,375,259,550
+Zona Pepsi,34,63,71,79,375,247,550
+Preferente Fondo,16,36,78,210,250,174,450
