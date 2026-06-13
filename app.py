@@ -362,10 +362,11 @@ with k3:
 # ============================================================
 # TABS
 # ============================================================
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🎚️ Simulador por Zona",
     "🎯 Optimizador Matemático",
     "📈 Curvas de Sensibilidad",
+    "🎫 Calculadora de Abonos",
     "🔬 Reporte Metodológico (E3)"
 ])
 
@@ -421,30 +422,6 @@ with tab1:
                 unsafe_allow_html=True
             )
 
-    st.markdown("### 📋 Resumen de Simulación")
-    df_t = df_sim.copy()
-    df_t["Var. Precio %"]     = ((df_t["p_proj"] - df_t["p_base"]) / df_t["p_base"] * 100).round(1)
-    df_t["Var. Asistencia %"] = ((df_t["q_proj"] - df_t["q_base"]) / df_t["q_base"] * 100).round(1)
-    st.dataframe(
-        df_t[["Zona","b","p_base","p_proj","Var. Precio %",
-              "q_base","q_proj","Var. Asistencia %","ing_base","ing_proj"]
-        ].rename(columns={
-            "b":"Elasticidad","p_base":"Precio Base","p_proj":"Precio Actual",
-            "q_base":"Boletos Base","q_proj":"Boletos Proy.",
-            "ing_base":"Ingreso Base","ing_proj":"Ingreso Proy."
-        }).style.format({
-            "Elasticidad": "{:.3f}",
-            "Precio Base": "${:,.0f}", "Precio Actual": "${:,.0f}",
-            "Var. Precio %": "{:+.1f}%",
-            "Boletos Base": "{:,.0f}", "Boletos Proy.": "{:,.0f}",
-            "Var. Asistencia %": "{:+.1f}%",
-            "Ingreso Base": "${:,.0f}", "Ingreso Proy.": "${:,.0f}"
-        }),
-        use_container_width=True, hide_index=True
-    )
-    csv = df_t.to_csv(index=False).encode("utf-8")
-    st.download_button("📥 Exportar simulación CSV", csv,
-                       "simulacion_capitanes.csv", "text/csv", type="primary")
 
 # ==========================================
 # TAB 2 — OPTIMIZADOR MATEMÁTICO
@@ -621,9 +598,144 @@ with tab3:
         )
 
 # ==========================================
-# TAB 4 — REPORTE METODOLÓGICO (E3)
+# TAB 4 — CALCULADORA DE ABONOS
 # ==========================================
 with tab4:
+    st.markdown("### 🎫 Calculadora de Precios de Abonos")
+    st.write(
+        "El precio del abono se calcula como **precio unitario × número de partidos × (1 − descuento)**. "
+        "El descuento sugerido está calibrado por la elasticidad de cada zona: zonas más elásticas "
+        "reciben un incentivo mayor para convertir fans en abonados y asegurar el ingreso anticipado."
+    )
+
+    ab_col1, ab_col2 = st.columns([1, 2])
+    with ab_col1:
+        n_partidos = st.number_input(
+            "Partidos en la temporada", min_value=1, max_value=100, value=47, step=1
+        )
+        aplicar_dto = st.toggle("Aplicar descuento", value=True)
+        if aplicar_dto:
+            modo_dto = st.radio(
+                "Modo de descuento",
+                ["Sugerido por elasticidad", "Manual (mismo % a todas las zonas)"],
+                index=0
+            )
+            if modo_dto == "Manual (mismo % a todas las zonas)":
+                dto_manual = st.slider("Descuento manual (%)", 0, 50, 15, 1) / 100
+            else:
+                dto_manual = None
+        else:
+            modo_dto = None
+            dto_manual = None
+
+    # Descuento sugerido por zona según elasticidad
+    # Lógica: |b| > 1 → 28%, 0.8–1 → 22%, 0.5–0.8 → 16%, < 0.5 → 10%
+    def descuento_sugerido(b):
+        ab = abs(b)
+        if ab >= 1.2:   return 0.28
+        elif ab >= 1.0: return 0.22
+        elif ab >= 0.8: return 0.18
+        elif ab >= 0.5: return 0.14
+        else:           return 0.10
+
+    # Construir tabla de abonos
+    abono_rows = []
+    for (zona, q50, qmax, p_base, p_min, p_max, tier) in ZONAS_DATA:
+        p_unit = current_prices.get(zona, p_base)
+        b      = get_beta(zona, beta_sel)
+        p_full = p_unit * n_partidos
+        if aplicar_dto:
+            if dto_manual is not None:
+                dto = dto_manual
+            else:
+                dto = descuento_sugerido(b)
+            p_abono = p_full * (1 - dto)
+        else:
+            dto     = 0.0
+            p_abono = p_full
+        ahorro = p_full - p_abono
+        abono_rows.append({
+            "Zona": zona, "Tier": tier, "b": b,
+            "Precio Unitario": p_unit,
+            "Precio Full (×partidos)": p_full,
+            "Descuento %": dto,
+            "Precio Abono": p_abono,
+            "Ahorro vs individual": ahorro,
+        })
+
+    df_abono = pd.DataFrame(abono_rows)
+
+    # KPIs
+    with ab_col2:
+        ak1, ak2, ak3 = st.columns(3)
+        with ak1:
+            metric_card(
+                "Abono promedio",
+                f"${df_abono['Precio Abono'].mean():,.0f}",
+                f"Todas las zonas · {n_partidos} partidos",
+            )
+        with ak2:
+            metric_card(
+                "Abono más económico",
+                f"${df_abono['Precio Abono'].min():,.0f}",
+                df_abono.loc[df_abono['Precio Abono'].idxmin(), 'Zona'],
+            )
+        with ak3:
+            metric_card(
+                "Abono premium",
+                f"${df_abono['Precio Abono'].max():,.0f}",
+                df_abono.loc[df_abono['Precio Abono'].idxmax(), 'Zona'],
+            )
+
+    st.markdown("#### Tabla de precios de abono por zona")
+
+    # Tarjetas visuales por zona
+    for idx, row in df_abono.iterrows():
+        dto_pct = row["Descuento %"] * 100
+        tier_color = {"popular": "#5B8DEF", "media": "#F4A82C",
+                      "alta": "#7FD49A", "premium": "#ff6d29"}.get(row["Tier"], "#BABABA")
+        dto_badge = (
+            f'<span style="background:rgba(127,212,154,0.15);color:#7FD49A;'
+            f'border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;">'
+            f'−{dto_pct:.0f}%</span>'
+            if dto_pct > 0 else ""
+        )
+        st.markdown(
+            f'<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);'
+            f'border-radius:12px;padding:12px 16px;margin-bottom:6px;'
+            f'display:flex;justify-content:space-between;align-items:center;">'
+            # left
+            f'<div style="flex:1;">'
+            f'<span style="font-weight:700;font-size:15px;color:#fff;">{row["Zona"]}</span>'
+            f'<span style="font-size:11px;color:{tier_color};margin-left:8px;">{row["Tier"].upper()}</span>'
+            f'<div style="font-size:12px;color:#BABABA;margin-top:2px;">'
+            f'b = {row["b"]:.2f} &nbsp;·&nbsp; unitario ${row["Precio Unitario"]:,} &nbsp;·&nbsp; '
+            f'full {n_partidos} partidos = ${row["Precio Full (×partidos)"]:,.0f}</div>'
+            f'</div>'
+            # right
+            f'<div style="text-align:right;min-width:200px;">'
+            f'<div style="font-size:22px;font-weight:700;color:#ff6d29;">'
+            f'${row["Precio Abono"]:,.0f} {dto_badge}</div>'
+            f'<div style="font-size:12px;color:#7FD49A;">'
+            f'Ahorro vs individual: ${row["Ahorro vs individual"]:,.0f}</div>'
+            f'</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+    if aplicar_dto and modo_dto == "Sugerido por elasticidad":
+        st.info(
+            "📐 **Lógica del descuento sugerido:** "
+            "zonas muy elásticas (|b| ≥ 1.2) → 28%; elásticas (1.0–1.2) → 22%; "
+            "moderadas (0.8–1.0) → 18%; semielásticas (0.5–0.8) → 14%; inelásticas (< 0.5) → 10%. "
+            "El descuento mayor en zonas elásticas convierte fans sensibles al precio en abonados, "
+            "asegurando el ingreso anticipado y reduciendo el riesgo de butacas vacías."
+        )
+
+# ==========================================
+# TAB 5 — REPORTE METODOLÓGICO (E3)
+# ==========================================
+with tab5:
     st.markdown("## Reporte Metodológico Estadístico — Modelo E3")
     st.markdown(
         "*Para personal técnico con formación en econometría y análisis de datos. "
